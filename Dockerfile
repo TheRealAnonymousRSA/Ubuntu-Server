@@ -14,7 +14,7 @@ FROM ubuntu:24.04
 
 LABEL org.opencontainers.image.title="TheRealAnonymousRSA-VPS" \
       org.opencontainers.image.description="Browser-based Ubuntu 24.04 terminal powered by ttyd" \
-      org.opencontainers.image.source="" \
+      org.opencontainers.image.source="https://github.com/TheRealAnonymousRSA/TheRealAnonymousRSA-VPS" \
       org.opencontainers.image.licenses="MIT"
 
 # Pin the ttyd release explicitly for reproducible builds. Verified working

@@ -13,7 +13,8 @@
 # It then hands off to start.sh via `exec`, so no wrapper shell is left
 # sitting between tini and ttyd.
 
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "Error on line $LINENO" >&2' ERR
 
 # ---------------------------------------------------------------------------
 # 0. Record session start time (used by sysinfo.sh for container uptime)
@@ -23,7 +24,7 @@ date +%s > /var/run/vps-start-time
 # ---------------------------------------------------------------------------
 # 1. Resolve configuration from environment, with sane defaults
 # ---------------------------------------------------------------------------
-: "${PORT:=8080}"
+: "${PORT:=7681}"
 : "${USERNAME:=admin}"
 : "${TZ:=UTC}"
 : "${SUDO_NOPASSWD:=true}"
@@ -50,7 +51,9 @@ fi
 # ---------------------------------------------------------------------------
 GENERATED_PASSWORD=false
 if [ -z "${PASSWORD:-}" ]; then
-    PASSWORD="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20)"
+    set +o pipefail
+PASSWORD="$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20)"
+set -o pipefail
     GENERATED_PASSWORD=true
 fi
 export PASSWORD
