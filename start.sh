@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-: "${PORT:=7681}"
+: "${PORT:=8080}"
 : "${USERNAME:=admin}"
 : "${PASSWORD:?PASSWORD must be set before start.sh runs (entrypoint.sh sets this)}"
 : "${ENABLE_SSL:=false}"
