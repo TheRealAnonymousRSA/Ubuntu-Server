@@ -1,19 +1,16 @@
 # syntax=docker/dockerfile:1
 #
-# TheRealAnonymousRSA-VPS
-# A browser-based Ubuntu 24.04 terminal, powered by ttyd.
+# TheRealAnonymousRSA VPS - v0.5 Beta
+# A browser-based Ubuntu 24.04 terminal, powered by ttyd and tmux.
 #
 # Build:
 #   docker build -t therealanonymousrsa-vps .
-#
-# The image installs ttyd from the project's official static release
-# binaries (https://github.com/tsl0922/ttyd/releases) rather than compiling
-# from source, keeping the image small and the build fast/reproducible.
 
 FROM ubuntu:24.04
 
-LABEL org.opencontainers.image.title="TheRealAnonymousRSA-VPS" \
-      org.opencontainers.image.description="Browser-based Ubuntu 24.04 terminal powered by ttyd" \
+LABEL org.opencontainers.image.title="TheRealAnonymousRSA VPS" \
+      org.opencontainers.image.description="Browser-based Ubuntu 24.04 terminal powered by ttyd and tmux" \
+      org.opencontainers.image.version="0.5.0-beta" \
       org.opencontainers.image.source="https://github.com/TheRealAnonymousRSA/TheRealAnonymousRSA-VPS" \
       org.opencontainers.image.licenses="MIT"
 
@@ -29,8 +26,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ---------------------------------------------------------------------------
 # Base packages
 # ---------------------------------------------------------------------------
-# tzdata + locales are added on top of the requested package list because
-# TZ handling and UTF-8 terminal rendering both depend on them being present.
+# tzdata, locales, iputils-ping, and traceroute are added on top of the
+# originally requested list because TZ handling, UTF-8 rendering, and the
+# `ping`/`traceroute` utilities all depend on them being present - none of
+# the four ship by default in a minimal ubuntu:24.04 image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         wget \
@@ -50,6 +49,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tzdata \
         locales \
         tini \
+        tmux \
+        iputils-ping \
+        traceroute \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -70,37 +72,38 @@ RUN set -eux; \
     /usr/local/bin/ttyd --version
 
 # ---------------------------------------------------------------------------
-# Project files
+# Project files - modular layout under /opt/tra, thin entrypoints at /
 # ---------------------------------------------------------------------------
 COPY entrypoint.sh /entrypoint.sh
 COPY start.sh /usr/local/bin/start.sh
 COPY healthcheck.sh /healthcheck.sh
-COPY VERSION /etc/vps-version
-COPY assets/banner.txt /etc/vps-banner.txt
-COPY scripts/user-setup.sh /usr/local/lib/vps/user-setup.sh
-COPY scripts/sysinfo.sh /usr/local/lib/vps/sysinfo.sh
-COPY scripts/banner.sh /usr/local/lib/vps/banner.sh
-COPY scripts/status.sh /usr/local/lib/vps/status.sh
-COPY scripts/update.sh /usr/local/lib/vps/update.sh
-COPY scripts/version.sh /usr/local/lib/vps/version.sh
-COPY scripts/profile.d/00-vps-shell.sh /etc/profile.d/00-vps-shell.sh
+COPY VERSION /etc/tra-version
+
+COPY src/core/         /opt/tra/core/
+COPY src/terminal/     /opt/tra/terminal/
+COPY src/system/       /opt/tra/system/
+COPY src/branding/banner.sh  /opt/tra/branding/banner.sh
+COPY src/branding/banner.txt /etc/tra-banner.txt
+COPY src/commands/*.sh /opt/tra/commands/
+COPY src/commands/profile.d/00-tra-shell.sh /etc/profile.d/00-tra-shell.sh
+COPY config/themes.sh  /opt/tra/config/themes.sh
 
 RUN chmod +x \
         /entrypoint.sh \
         /usr/local/bin/start.sh \
         /healthcheck.sh \
-        /usr/local/lib/vps/user-setup.sh \
-        /usr/local/lib/vps/sysinfo.sh \
-        /usr/local/lib/vps/banner.sh \
-        /usr/local/lib/vps/status.sh \
-        /usr/local/lib/vps/update.sh \
-        /usr/local/lib/vps/version.sh \
-    && chmod 0644 /etc/profile.d/00-vps-shell.sh \
-    && ln -sf /usr/local/lib/vps/status.sh   /usr/local/bin/status \
-    && ln -sf /usr/local/lib/vps/update.sh   /usr/local/bin/update \
-    && ln -sf /usr/local/lib/vps/banner.sh   /usr/local/bin/banner \
-    && ln -sf /usr/local/lib/vps/version.sh  /usr/local/bin/version \
-    && ln -sf /healthcheck.sh                /usr/local/bin/health
+        /opt/tra/core/*.sh \
+        /opt/tra/terminal/*.sh \
+        /opt/tra/system/*.sh \
+        /opt/tra/branding/banner.sh \
+        /opt/tra/commands/*.sh \
+        /opt/tra/config/themes.sh \
+    && chmod 0644 /etc/profile.d/00-tra-shell.sh \
+    && for f in /opt/tra/commands/tra-*.sh; do \
+         name="$(basename "$f" .sh)"; \
+         ln -sf "$f" "/usr/local/bin/${name}"; \
+       done \
+    && ln -sf /healthcheck.sh /usr/local/bin/tra-health
 
 # ---------------------------------------------------------------------------
 # Runtime defaults (all overridable via `docker run -e` / compose / PaaS envs)
@@ -109,7 +112,8 @@ ENV PORT=7681 \
     USERNAME=admin \
     TZ=UTC \
     SUDO_NOPASSWD=true \
-    ENABLE_SSL=false
+    ENABLE_SSL=false \
+    TERMINAL_THEME=dark
 
 EXPOSE 7681
 

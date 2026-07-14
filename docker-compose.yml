@@ -7,14 +7,15 @@ services:
     container_name: therealanonymousrsa-vps
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:${PORT:-8080}"
+      - "${PORT:-7681}:${PORT:-7681}"
     environment:
-      PORT: "${PORT:-8080}"
+      PORT: "${PORT:-7681}"
       USERNAME: "${USERNAME:-admin}"
       PASSWORD: "${PASSWORD:-}"
       TZ: "${TZ:-UTC}"
       SUDO_NOPASSWD: "${SUDO_NOPASSWD:-true}"
       ENABLE_SSL: "${ENABLE_SSL:-false}"
+      TERMINAL_THEME: "${TERMINAL_THEME:-dark}"
     volumes:
       - vps-home:/home/${USERNAME:-admin}
     healthcheck:

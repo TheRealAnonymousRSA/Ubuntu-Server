@@ -2,71 +2,68 @@
 #
 # entrypoint.sh
 #
-# Runs as tini's direct child (effectively PID 2, with tini as PID 1).
-# Performs one-time, idempotent root-level setup:
-#   - resolves PORT / USERNAME / PASSWORD / TZ from the environment
-#   - configures the timezone
-#   - creates or updates the Linux user account and its sudo rights
-#   - records a session start time for uptime reporting
-#   - prints the banner and (if generated) the one-time password notice
+# Runs as tini's direct child (tini is PID 1; see Dockerfile). Performs
+# one-time, idempotent root-level setup, then hands off to start.sh via
+# `exec` so no wrapper shell is left sitting between tini and ttyd.
 #
-# It then hands off to start.sh via `exec`, so no wrapper shell is left
-# sitting between tini and ttyd.
+# bootstrap.sh is *sourced*, not executed as a subprocess - a subprocess's
+# environment-variable fixes (e.g. falling back to a valid PORT) would be
+# invisible to this shell once it exited. Sourcing keeps everything in one
+# process so the corrected values actually take effect.
 
-set -Eeuo pipefail
-trap 'echo "Error on line $LINENO" >&2' ERR
+set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# 0. Record session start time (used by sysinfo.sh for container uptime)
-# ---------------------------------------------------------------------------
-date +%s > /var/run/vps-start-time
+date +%s > /var/run/tra-start-time
 
-# ---------------------------------------------------------------------------
-# 1. Resolve configuration from environment, with sane defaults
-# ---------------------------------------------------------------------------
-: "${PORT:=8080}"
-: "${USERNAME:=admin}"
-: "${TZ:=UTC}"
-: "${SUDO_NOPASSWD:=true}"
-: "${ENABLE_SSL:=false}"
-
-export PORT USERNAME TZ SUDO_NOPASSWD ENABLE_SSL
+# shellcheck source=src/core/logging.sh
+source /opt/tra/core/logging.sh
+# shellcheck source=src/core/bootstrap.sh
+source /opt/tra/core/bootstrap.sh
 
 # ---------------------------------------------------------------------------
-# 2. Timezone
-# ---------------------------------------------------------------------------
-if [ -f "/usr/share/zoneinfo/${TZ}" ]; then
-    ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime
-    echo "${TZ}" > /etc/timezone
-else
-    echo "[entrypoint] Warning: TZ='${TZ}' not recognized, falling back to UTC" >&2
-    TZ=UTC
-    export TZ
-    ln -snf /usr/share/zoneinfo/UTC /etc/localtime
-    echo "UTC" > /etc/timezone
-fi
-
-# ---------------------------------------------------------------------------
-# 3. Resolve the login password
+# Resolve the login password (not part of bootstrap.sh's validation, since
+# it needs to be generated fresh - not merely checked - when absent)
 # ---------------------------------------------------------------------------
 GENERATED_PASSWORD=false
 if [ -z "${PASSWORD:-}" ]; then
-    set +o pipefail
-PASSWORD="$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 20)"
-set -o pipefail
+    PASSWORD="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 20)"
     GENERATED_PASSWORD=true
 fi
 export PASSWORD
 
 # ---------------------------------------------------------------------------
-# 4. Create/update the Linux user account (idempotent)
+# Timezone
 # ---------------------------------------------------------------------------
-/usr/local/lib/vps/user-setup.sh "${USERNAME}" "${PASSWORD}" "${SUDO_NOPASSWD}"
+ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime
+echo "${TZ}" > /etc/timezone
 
 # ---------------------------------------------------------------------------
-# 5. Banner + one-time credentials notice (visible in `docker logs`)
+# Create/update the Linux user account (idempotent)
 # ---------------------------------------------------------------------------
-/usr/local/lib/vps/banner.sh
+/opt/tra/core/user-setup.sh "${USERNAME}" "${PASSWORD}" "${SUDO_NOPASSWD}"
+
+# ---------------------------------------------------------------------------
+# Persist the values healthcheck.sh needs into /etc/environment
+# ---------------------------------------------------------------------------
+# `su -` (used to land in the login user's shell - see launch.sh) resets the
+# environment as real logins do, so PORT/ENABLE_SSL as set on the container
+# are NOT visible inside a logged-in terminal session. Without this, running
+# `tra-health` (or `tra-status`, which calls it) from inside the terminal
+# would silently check the wrong port whenever PORT is not the default 7681.
+# /etc/environment is read by PAM for every login shell, `su -` included, so
+# writing TRA_-prefixed copies here makes them survive that reset.
+# Idempotent: strip any previous TRA_PORT/TRA_ENABLE_SSL lines before adding
+# the current ones, so restarting the same container doesn't grow this file.
+sed -i '/^TRA_PORT=/d;/^TRA_ENABLE_SSL=/d' /etc/environment
+{
+    echo "TRA_PORT=${PORT}"
+    echo "TRA_ENABLE_SSL=${ENABLE_SSL}"
+} >> /etc/environment
+
+# ---------------------------------------------------------------------------
+# Banner + one-time credentials notice (visible in `docker logs`)
+# ---------------------------------------------------------------------------
+/opt/tra/branding/banner.sh
 
 if [ "${GENERATED_PASSWORD}" = true ]; then
     cat <<EOF
@@ -84,6 +81,6 @@ if [ "${GENERATED_PASSWORD}" = true ]; then
 EOF
 fi
 
-echo "[entrypoint] Handing off to start.sh (PORT=${PORT}, USERNAME=${USERNAME}, ENABLE_SSL=${ENABLE_SSL})"
+log_info "Handing off to start.sh"
 
 exec /usr/local/bin/start.sh

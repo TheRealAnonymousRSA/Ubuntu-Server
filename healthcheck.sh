@@ -3,18 +3,28 @@
 # healthcheck.sh
 #
 # Confirms ttyd is alive and serving HTTP(S) on $PORT. Used both as the
-# Docker HEALTHCHECK command and as the `health` helper command inside a
-# logged-in terminal session (they are the same script, symlinked).
+# Docker HEALTHCHECK command and as the `tra-status` command's health
+# line (same script, symlinked as tra-status calls it directly).
 #
 # ttyd requires Basic Auth, so an unauthenticated request correctly gets a
-# 401 rather than a 200 -- both are treated as "healthy" here, since either
+# 401 rather than a 200 - both are treated as "healthy" here, since either
 # one proves ttyd is up and responding. A connection failure (curl exit
 # nonzero, code "000") means it is not.
+#
+# Note: the tmux session ("main") is created lazily on the *first* client
+# connection, not at container startup - so its absence immediately after
+# boot is completely normal and is deliberately NOT treated as unhealthy
+# here. `tra-status` reports it separately as informational context.
 
 set -uo pipefail
 
-: "${PORT:=8080}"
-: "${ENABLE_SSL:=false}"
+# PORT/ENABLE_SSL are set directly when Docker's HEALTHCHECK runs this (it
+# inherits the container's environment). When a logged-in user runs this
+# manually (via `tra-health` / `tra-status`), `su -` has reset the
+# environment, so fall back to the TRA_-prefixed copies entrypoint.sh
+# persisted into /etc/environment specifically so this still works there.
+: "${PORT:=${TRA_PORT:-7681}}"
+: "${ENABLE_SSL:=${TRA_ENABLE_SSL:-false}}"
 
 if [ "${ENABLE_SSL}" = "true" ]; then
     scheme="https"
